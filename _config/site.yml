@@ -1,0 +1,24 @@
+---
+Name: silvergateapi-site
+Before: '#rootroutes'
+Only:
+  moduleexists: 'atwx/silverstripe-gate-client'
+---
+# The site role: answer API calls. Only active where the gate client is
+# installed, because that is what validates the tokens.
+SilverStripe\Control\Director:
+  rules:
+    '_silvergateapi': 'Atwx\SilverGateApi\Site\Controllers\ApiController'
+
+# Classes that are never reachable through the API, regardless of what the
+# token claims. Security internals stay off limits.
+Atwx\SilverGateApi\Site\Services\AccessPolicy:
+  denied_classes:
+    - SilverStripe\Security\Member
+    - SilverStripe\Security\Group
+    - SilverStripe\Security\Permission
+    - SilverStripe\Security\PermissionRole
+    - SilverStripe\Security\PermissionRoleCode
+    - SilverStripe\Security\LoginAttempt
+    - SilverStripe\Security\RememberLoginHash
+    - SilverStripe\Security\MemberPassword

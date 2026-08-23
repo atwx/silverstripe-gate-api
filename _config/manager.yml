@@ -1,0 +1,10 @@
+---
+Name: silvergateapi-manager
+Only:
+  moduleexists: 'atwx/silverstripe-gate-manager'
+---
+# The manager role: make API calls. Only active where the gate manager is
+# installed, because that is what holds the private keys.
+Atwx\SilverGateManager\Models\ManagedSite:
+  extensions:
+    - Atwx\SilverGateApi\Manager\Extensions\ManagedSiteExtension

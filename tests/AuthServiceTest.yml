@@ -1,0 +1,7 @@
+SilverStripe\Security\Member:
+  fallback:
+    Email: fallback@example.com
+    FirstName: Fallback
+  editor:
+    Email: editor@example.com
+    FirstName: Editor
