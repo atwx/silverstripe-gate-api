@@ -17,7 +17,7 @@ can be active at once on an install that carries both siblings.
 | Installed alongside | Role | What it does |
 | --- | --- | --- |
 | `atwx/silverstripe-gate-client` | **site** | Answers API calls. Registers `/_silvergateapi` and validates tokens with the client's `TokenService`. |
-| `atwx/silverstripe-gate-manager` | **manager** | Makes API calls. Signs a token per `ManagedSite` with that site's own private key and calls its endpoint. |
+| `atwx/silverstripe-gate-manager` | **manager** | Makes API calls, and serves them over MCP. Signs a token per `ManagedSite` with that site's own private key and calls its endpoint. |
 | neither | none | The module is inert. |
 
 Neither sibling is a hard dependency; the roles are switched on by Silverstripe's
@@ -87,6 +87,78 @@ SiteApiClient::singleton()->create(
 
 `create()` and `update()` add `scope: write` for you; everything else defaults to
 read.
+
+## MCP server
+
+Where the manager role is active, the module also serves a
+[Model Context Protocol](https://modelcontextprotocol.io) endpoint at
+`/_silvergatemcp`. One server covers every managed site: the tools take a
+`site` argument instead of the server being installed per site, so a client
+sees one small tool set rather than one set per site.
+
+```
+https://your-manager.example/_silvergatemcp
+```
+
+Clients discover everything else themselves. Registration is dynamic (RFC 7591),
+so there is nothing to configure by hand:
+
+| Document | Path |
+| --- | --- |
+| Protected resource metadata (RFC 9728) | `/.well-known/oauth-protected-resource` |
+| Authorization server metadata (RFC 8414) | `/.well-known/oauth-authorization-server` |
+
+### Tools
+
+`sites_list` first — it returns only the sites the caller may reach, and whether
+each is writable. Everything else mirrors one action of the site API:
+`site_classes`, `site_schema`, `site_query`, `site_get`, `site_create`,
+`site_update`, `site_delete`, `site_publish`, `site_unpublish`.
+
+The write tools are hidden from `tools/list` unless the connection was
+authorised for writing, so a read-only client is not tempted by them.
+
+### Authorisation
+
+OAuth 2.1 with PKCE, public clients only. Two scopes:
+
+| Scope | Grants |
+| --- | --- |
+| `mcp` | Read |
+| `mcp:write` | Read, plus create, update, delete, publish |
+
+The user authenticates with the manager's own login and is shown a consent
+screen naming the client and spelling out whether write access was asked for.
+The resulting token names a member, and every call downstream acts as that
+member: the site sees `sub` set to their email, applies their `canEdit()`, and
+records them in `LastEdited`.
+
+Codes are single use, valid for two minutes, and bound to a PKCE S256 challenge.
+Refresh tokens rotate: using one revokes it. Codes and tokens are stored only as
+hashes.
+
+### Deciding who reaches which site
+
+`SitePolicy` answers that. By default a member may reach any site they could log
+into with SilverGate, on the grounds that the API grants nothing the browser
+login would not. Installs with a finer grained model narrow it:
+
+```php
+class MySitePolicyExtension extends Extension
+{
+    public function updateSiteAccess(bool &$allowed, ManagedSite $site, Member $member, string $scope)
+    {
+        $allowed = $allowed && $this->myOwnRule($site, $member, $scope);
+    }
+}
+```
+
+```yaml
+Atwx\SilverGateApi\Manager\Mcp\SitePolicy:
+  extensions:
+    - MySitePolicyExtension
+```
+
 
 ## Requests
 

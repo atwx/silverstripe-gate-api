@@ -1,10 +1,22 @@
 ---
 Name: silvergateapi-manager
+Before: '#rootroutes'
 Only:
   moduleexists: 'atwx/silverstripe-gate-manager'
 ---
-# The manager role: make API calls. Only active where the gate manager is
-# installed, because that is what holds the private keys.
+# The manager role: make API calls, and expose them over MCP. Only active where
+# the gate manager is installed, because that is what holds the private keys.
 Atwx\SilverGateManager\Models\ManagedSite:
   extensions:
     - Atwx\SilverGateApi\Manager\Extensions\ManagedSiteExtension
+
+SilverStripe\Control\Director:
+  rules:
+    '.well-known/oauth-authorization-server':
+      Controller: 'Atwx\SilverGateApi\Manager\Controllers\DiscoveryController'
+      Action: 'authorizationServer'
+    '.well-known/oauth-protected-resource':
+      Controller: 'Atwx\SilverGateApi\Manager\Controllers\DiscoveryController'
+      Action: 'protectedResource'
+    '_silvergatemcp/oauth': 'Atwx\SilverGateApi\Manager\Controllers\OAuthController'
+    '_silvergatemcp': 'Atwx\SilverGateApi\Manager\Controllers\McpController'

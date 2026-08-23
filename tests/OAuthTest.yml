@@ -1,0 +1,4 @@
+SilverStripe\Security\Member:
+  operator:
+    Email: operator@example.com
+    FirstName: Operator
