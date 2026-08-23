@@ -9,6 +9,7 @@ use LeKoala\CmsActions\CustomAction;
 use SilverStripe\Core\Extension;
 use SilverStripe\Forms\FieldList;
 use SilverStripe\Forms\LiteralField;
+use SilverStripe\Security\PermissionFailureException;
 
 /**
  * Adds the API calling side to ManagedSite, so the manager gains the ability
@@ -50,6 +51,10 @@ class ManagedSiteExtension extends Extension
             return;
         }
 
+        if (!$this->canUseApi()) {
+            return;
+        }
+
         $actions->push(
             CustomAction::create('doTestGateApi', 'Test API')
                 ->setShouldRefresh(false)
@@ -61,6 +66,14 @@ class ManagedSiteExtension extends Extension
      */
     public function doTestGateApi(): string
     {
+        // Same bar as logging into the site: reaching it programmatically is
+        // no less privileged than reaching it through the browser.
+        if (!$this->canUseApi()) {
+            throw new PermissionFailureException(
+                'You do not have permission to call the API on this site.'
+            );
+        }
+
         try {
             $result = SiteApiClient::singleton()->ping($this->owner);
         } catch (ApiException $e) {
@@ -72,5 +85,15 @@ class ManagedSiteExtension extends Extension
             $result['member'] ?? 'unknown',
             $result['scope'] ?? 'unknown'
         );
+    }
+
+    /**
+     * Guards the CMS facing parts only. callApi() itself is deliberately
+     * unguarded: it is called from code that has already decided who may act,
+     * such as a task or the MCP layer.
+     */
+    protected function canUseApi(): bool
+    {
+        return !$this->owner->hasMethod('canLogin') || $this->owner->canLogin();
     }
 }
