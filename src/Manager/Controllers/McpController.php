@@ -224,8 +224,8 @@ class McpController extends Controller
 
         if ($statusCode === 401) {
             $response->addHeader('WWW-Authenticate', sprintf(
-                'Bearer resource_metadata="%s/.well-known/oauth-protected-resource"',
-                rtrim(Director::absoluteBaseURL(), '/')
+                'Bearer resource_metadata="%s"',
+                OAuthController::endpoint('.well-known/oauth-protected-resource')
             ));
         }
 

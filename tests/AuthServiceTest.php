@@ -12,6 +12,7 @@ use SilverStripe\Control\HTTPRequest;
 use SilverStripe\Core\Config\Config;
 use SilverStripe\Core\Environment;
 use SilverStripe\Dev\SapphireTest;
+use SilverStripe\Security\DefaultAdminService;
 use SilverStripe\Security\Member;
 
 class AuthServiceTest extends SapphireTest
@@ -103,8 +104,35 @@ class AuthServiceTest extends SapphireTest
         $this->assertSame($id, $context->getMember()->ID);
     }
 
-    public function testUnknownSubjectIsRejected(): void
+    public function testUnknownSubjectFallsBackToTheConfiguredMember(): void
     {
+        $context = AuthService::create()->authenticate(
+            $this->request($this->token(['sub' => 'nobody@example.com']))
+        );
+
+        $this->assertSame('fallback@example.com', $context->getMember()->Email);
+    }
+
+    public function testUnknownSubjectFallsBackToTheDefaultAdmin(): void
+    {
+        // Nothing configured, so the gate client's own default applies.
+        Config::modify()->set(LoginService::class, 'member_email', null);
+        Config::modify()->set(LoginService::class, 'login_as_default_admin', true);
+        DefaultAdminService::clearDefaultAdmin();
+        DefaultAdminService::setDefaultAdmin('admin@example.com', 'secret');
+
+        $context = AuthService::create()->authenticate(
+            $this->request($this->token(['sub' => 'nobody@example.com']))
+        );
+
+        $this->assertSame('admin@example.com', $context->getMember()->Email);
+    }
+
+    public function testUnknownSubjectIsRejectedWhenNoDefaultMemberExists(): void
+    {
+        Config::modify()->set(LoginService::class, 'member_email', null);
+        Config::modify()->set(LoginService::class, 'login_as_default_admin', false);
+
         $this->expectException(ApiException::class);
 
         AuthService::create()->authenticate(

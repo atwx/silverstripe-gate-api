@@ -26,8 +26,9 @@ use stdClass;
  *
  * Supported claims, all optional:
  *
- *   sub      Email or ID of the member to act as. Falls back to the gate
- *            client's configured member.
+ *   sub      Email or ID of the member to act as. A subject that names
+ *            nobody here falls back to the gate client's configured member,
+ *            exactly as an absent claim does.
  *   scope    "read" (default) or "write".
  *   classes  Array of class names the token is limited to.
  *
@@ -126,11 +127,14 @@ class AuthService
                 ? Member::get()->byID((int) $subject)
                 : Member::get()->filter('Email', $subject)->first();
 
-            if (!$member) {
-                throw new ApiException('The member named in the token does not exist.', 403);
+            if ($member) {
+                return $member;
             }
 
-            return $member;
+            // The token is signed with this site's key, so the caller is
+            // trusted and only the member it names is unknown here. Managers
+            // address many sites and cannot have an account on each, so fall
+            // through to the default rather than refusing the call.
         }
 
         return LoginService::singleton()->findMember();

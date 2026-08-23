@@ -134,8 +134,28 @@ member: the site sees `sub` set to their email, applies their `canEdit()`, and
 records them in `LastEdited`.
 
 Codes are single use, valid for two minutes, and bound to a PKCE S256 challenge.
-Refresh tokens rotate: using one revokes it. Codes and tokens are stored only as
-hashes.
+Codes and tokens are stored only as hashes.
+
+Refresh tokens rotate: using one revokes it and issues a fresh pair. Three
+things end a session, so a leaked token cannot grant access forever:
+
+| Setting | Default | Ends |
+| --- | --- | --- |
+| `OAuthToken.lifetime` | 1 hour | the access token; the client refreshes |
+| `OAuthToken.refresh_idle_lifetime` | 14 days | a refresh token nobody uses |
+| `OAuthToken.refresh_absolute_lifetime` | 30 days | the whole chain, counted from the original sign-in |
+
+A rotation carries the chain's start forward, so refreshing often cannot push
+the absolute limit out.
+
+**Reuse detection.** Because rotation revokes the old refresh token, a spent one
+turning up again means someone kept a copy. There is no way to tell the real
+client from an attacker at that point, so every token that client holds for that
+member is revoked and the user has to sign in again. The event is logged with
+the member and client involved.
+
+Tokens are visible in the CMS with member, client, scope, when the session
+started and when it was last used, and can be revoked by deleting them.
 
 ### Deciding who reaches which site
 

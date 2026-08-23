@@ -112,7 +112,7 @@ class OAuthTest extends SapphireTest
 
         $this->assertNotSame($issued['access'], $issued['refresh']);
         $this->assertNull(OAuthToken::findByAccessToken($issued['refresh']));
-        $this->assertNull(OAuthToken::findByRefreshToken($issued['access']));
+        $this->assertNull(OAuthToken::lookupRefreshToken($issued['access']));
     }
 
     public function testRevokedTokenStopsWorking(): void
@@ -121,7 +121,71 @@ class OAuthTest extends SapphireTest
         $issued['token']->revoke();
 
         $this->assertNull(OAuthToken::findByAccessToken($issued['access']));
-        $this->assertNull(OAuthToken::findByRefreshToken($issued['refresh']));
+        $this->assertFalse(OAuthToken::lookupRefreshToken($issued['refresh'])->isRefreshUsable());
+    }
+
+    public function testRefreshTokenExpiresWhenLeftUnused(): void
+    {
+        Config::modify()->set(OAuthToken::class, 'refresh_idle_lifetime', 3600);
+        $issued = OAuthToken::issue($this->client(), $this->member(), 'mcp');
+
+        DBDatetime::set_mock_now(date('Y-m-d H:i:s', time() + 7200));
+        $this->assertFalse(OAuthToken::lookupRefreshToken($issued['refresh'])->isRefreshUsable());
+        DBDatetime::clear_mock_now();
+    }
+
+    public function testChainEndsAtItsAbsoluteAgeHoweverOftenItRotates(): void
+    {
+        Config::modify()->set(OAuthToken::class, 'refresh_absolute_lifetime', 86400);
+        Config::modify()->set(OAuthToken::class, 'refresh_idle_lifetime', 999999);
+
+        $client = $this->client();
+        $issued = OAuthToken::issue($client, $this->member(), 'mcp');
+        $chainStart = $issued['token']->ChainStartedAt;
+
+        // Rotate well inside the window; the replacement keeps the same start.
+        DBDatetime::set_mock_now(date('Y-m-d H:i:s', time() + 3600));
+        $rotated = OAuthToken::issue($client, $this->member(), 'mcp', $chainStart);
+        $this->assertSame($chainStart, $rotated['token']->ChainStartedAt);
+        $this->assertTrue($rotated['token']->isRefreshUsable());
+
+        // Past the absolute age, refreshing again is refused.
+        DBDatetime::set_mock_now(date('Y-m-d H:i:s', time() + 90000));
+        $this->assertTrue($rotated['token']->isChainExpired());
+        $this->assertFalse($rotated['token']->isRefreshUsable());
+        DBDatetime::clear_mock_now();
+    }
+
+    public function testRevokingTheChainKillsEveryTokenOfThatClientAndMember(): void
+    {
+        $client = $this->client();
+        $other = $this->client(['https://other.example/cb']);
+
+        $first = OAuthToken::issue($client, $this->member(), 'mcp');
+        $second = OAuthToken::issue($client, $this->member(), 'mcp:write');
+        $unrelated = OAuthToken::issue($other, $this->member(), 'mcp');
+
+        $this->assertSame(2, $first['token']->revokeChain());
+
+        $this->assertNull(OAuthToken::findByAccessToken($first['access']));
+        $this->assertNull(OAuthToken::findByAccessToken($second['access']));
+        // A grant to a different client is a different authorisation.
+        $this->assertNotNull(OAuthToken::findByAccessToken($unrelated['access']));
+    }
+
+    public function testAChainStartsFreshWhenNoStartIsCarriedOver(): void
+    {
+        Config::modify()->set(OAuthToken::class, 'refresh_absolute_lifetime', 86400);
+
+        $old = OAuthToken::issue($this->client(), $this->member(), 'mcp');
+        DBDatetime::set_mock_now(date('Y-m-d H:i:s', time() + 90000));
+
+        $this->assertTrue($old['token']->isChainExpired());
+
+        // A new authorisation, not a rotation: the clock restarts.
+        $fresh = OAuthToken::issue($this->client(), $this->member(), 'mcp');
+        $this->assertFalse($fresh['token']->isChainExpired());
+        DBDatetime::clear_mock_now();
     }
 
     public function testExpiredTokenStopsWorking(): void

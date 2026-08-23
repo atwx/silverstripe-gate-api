@@ -3,7 +3,6 @@
 namespace Atwx\SilverGateApi\Manager\Controllers;
 
 use SilverStripe\Control\Controller;
-use SilverStripe\Control\Director;
 use SilverStripe\Control\HTTPRequest;
 use SilverStripe\Control\HTTPResponse;
 
@@ -49,11 +48,9 @@ class DiscoveryController extends Controller
 
     private function protectedResource(): HTTPResponse
     {
-        $base = rtrim(Director::absoluteBaseURL(), '/');
-
         return $this->json([
-            'resource' => $base . '/_silvergatemcp',
-            'authorization_servers' => [$base],
+            'resource' => OAuthController::endpoint('_silvergatemcp'),
+            'authorization_servers' => [OAuthController::issuer()],
             'scopes_supported' => [OAuthController::SCOPE_READ, OAuthController::SCOPE_WRITE],
             'bearer_methods_supported' => ['header'],
         ]);

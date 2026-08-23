@@ -8,7 +8,9 @@ use Atwx\SilverGateApi\Manager\OAuth\OAuthToken;
 use SilverStripe\Control\Controller;
 use SilverStripe\Control\Director;
 use SilverStripe\Control\HTTPRequest;
+use Psr\Log\LoggerInterface;
 use SilverStripe\Control\HTTPResponse;
+use SilverStripe\Core\Injector\Injector;
 use SilverStripe\Security\Member;
 use SilverStripe\Security\Security;
 
@@ -60,19 +62,29 @@ class OAuthController extends Controller
     }
 
     /**
+     * Every URL this server hands out goes through here.
+     *
+     * Director::absoluteBaseURL() may or may not end in a slash depending on
+     * the install, so concatenating a path onto it produces "example.com_path"
+     * on some sites and the right thing on others. join_links settles it.
+     */
+    public static function endpoint(string $path): string
+    {
+        return Controller::join_links(self::issuer(), $path);
+    }
+
+    /**
      * RFC 8414 authorization server metadata.
      *
      * @return array<string, mixed>
      */
     public static function metadata(): array
     {
-        $base = self::issuer();
-
         return [
-            'issuer' => $base,
-            'authorization_endpoint' => $base . '/_silvergatemcp/oauth/authorize',
-            'token_endpoint' => $base . '/_silvergatemcp/oauth/token',
-            'registration_endpoint' => $base . '/_silvergatemcp/oauth/register',
+            'issuer' => self::issuer(),
+            'authorization_endpoint' => self::endpoint('_silvergatemcp/oauth/authorize'),
+            'token_endpoint' => self::endpoint('_silvergatemcp/oauth/token'),
+            'registration_endpoint' => self::endpoint('_silvergatemcp/oauth/register'),
             'scopes_supported' => [self::SCOPE_READ, self::SCOPE_WRITE],
             'response_types_supported' => ['code'],
             'grant_types_supported' => ['authorization_code', 'refresh_token'],
@@ -156,9 +168,14 @@ class OAuthController extends Controller
         $member = Security::getCurrentUser();
 
         if (!$member) {
-            return $this->redirect(
-                Security::config()->get('login_url') . '?BackURL=' . urlencode($request->getURL(true))
-            );
+            // Both URLs have to be absolute. HTTPRequest::getURL() returns a
+            // path with no leading slash, and a BackURL in that form gets
+            // concatenated straight onto the host after login, producing
+            // "example.com_silvergatemcp" rather than a path.
+            return $this->redirect(Controller::join_links(
+                Security::login_url(),
+                '?BackURL=' . urlencode(Director::absoluteURL($request->getURL(true)))
+            ));
         }
 
         return $this->renderWith('Atwx\\SilverGateApi\\McpConsent', [
@@ -170,7 +187,7 @@ class OAuthController extends Controller
             'State' => $state,
             'CodeChallenge' => $challenge,
             'Scope' => $scope,
-            'ApproveLink' => Director::absoluteBaseURL() . '_silvergatemcp/oauth/approve',
+            'ApproveLink' => self::endpoint('_silvergatemcp/oauth/approve'),
             'SecurityToken' => $this->getSecurityToken(),
         ]);
     }
@@ -276,10 +293,38 @@ class OAuthController extends Controller
 
     private function exchangeRefreshToken(HTTPRequest $request): HTTPResponse
     {
-        $existing = OAuthToken::findByRefreshToken((string) $request->postVar('refresh_token'));
+        $existing = OAuthToken::lookupRefreshToken((string) $request->postVar('refresh_token'));
 
         if (!$existing) {
             return $this->json(['error' => 'invalid_grant'], 400);
+        }
+
+        // A refresh token that was already spent is presented again. Rotation
+        // means the legitimate client no longer holds it, so someone kept a
+        // copy. Which of the two is asking cannot be told apart from here, so
+        // end the whole grant and make the user sign in again.
+        if ($existing->RevokedAt) {
+            $revoked = $existing->revokeChain();
+
+            Injector::inst()->get(LoggerInterface::class)->warning(sprintf(
+                'SilverGate MCP: refresh token reuse for member %s via client %s, revoked %d token(s).',
+                $existing->Member()?->Email ?: 'unknown',
+                $existing->Client()?->Name ?: 'unknown',
+                $revoked
+            ));
+
+            return $this->json(['error' => 'invalid_grant'], 400);
+        }
+
+        if (!$existing->isRefreshUsable()) {
+            $existing->revoke();
+
+            return $this->json([
+                'error' => 'invalid_grant',
+                'error_description' => $existing->isChainExpired()
+                    ? 'This authorisation has reached its maximum age. Sign in again.'
+                    : 'The refresh token has expired. Sign in again.',
+            ], 400);
         }
 
         $client = OAuthClient::findByIdentifier((string) $request->postVar('client_id'));
@@ -294,10 +339,16 @@ class OAuthController extends Controller
             return $this->json(['error' => 'invalid_grant'], 400);
         }
 
-        // Rotate: the old refresh token stops working once it has been used.
+        // Rotate: the old refresh token stops working once it has been used,
+        // and the replacement inherits the chain's start.
         $existing->revoke();
 
-        return $this->tokenResponse(OAuthToken::issue($client, $member, (string) $existing->Scope));
+        return $this->tokenResponse(OAuthToken::issue(
+            $client,
+            $member,
+            (string) $existing->Scope,
+            (string) $existing->ChainStartedAt
+        ));
     }
 
     /**
