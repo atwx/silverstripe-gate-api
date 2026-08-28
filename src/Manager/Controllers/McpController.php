@@ -4,7 +4,8 @@ namespace Atwx\SilverGateApi\Manager\Controllers;
 
 use Atwx\SilverGateApi\Exceptions\ApiException;
 use Atwx\SilverGateApi\Manager\Mcp\ToolRegistry;
-use Atwx\SilverGateApi\Manager\OAuth\OAuthToken;
+use Atwx\SilverGateManager\Controllers\OAuthController;
+use Atwx\SilverGateManager\OAuth\OAuthToken;
 use SilverStripe\Control\Controller;
 use SilverStripe\Control\Director;
 use SilverStripe\Control\HTTPRequest;

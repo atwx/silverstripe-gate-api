@@ -12,11 +12,6 @@ Atwx\SilverGateManager\Models\ManagedSite:
 
 SilverStripe\Control\Director:
   rules:
-    '.well-known/oauth-authorization-server':
-      Controller: 'Atwx\SilverGateApi\Manager\Controllers\DiscoveryController'
-      Action: 'authorizationServer'
-    '.well-known/oauth-protected-resource':
-      Controller: 'Atwx\SilverGateApi\Manager\Controllers\DiscoveryController'
-      Action: 'protectedResource'
-    '_silvergatemcp/oauth': 'Atwx\SilverGateApi\Manager\Controllers\OAuthController'
+    # The authorization server describes itself; gate-manager serves that.
+    '.well-known/oauth-protected-resource': 'Atwx\SilverGateApi\Manager\Controllers\DiscoveryController'
     '_silvergatemcp': 'Atwx\SilverGateApi\Manager\Controllers\McpController'
