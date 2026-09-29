@@ -115,6 +115,19 @@ each is writable. Everything else mirrors one action of the site API:
 `site_classes`, `site_schema`, `site_query`, `site_get`, `site_create`,
 `site_update`, `site_delete`, `site_publish`, `site_unpublish`.
 
+`site_upload_url` is the exception: files are too large to pass through an MCP
+connection, so the tool returns a presigned request instead and the client
+sends the file itself, e.g.
+
+```bash
+curl -X POST https://example.com/_silvergateapi/upload \
+  -H "Authorization: Bearer <token from site_upload_url>" \
+  -F "file=@slides.pdf" -F "folder=Slides"
+```
+
+The token is limited to the `upload` action and expires with gate-client's
+`token_max_age_seconds`, so request a fresh one per file.
+
 The write tools are hidden from `tools/list` unless the connection was
 authorised for writing, so a read-only client is not tempted by them.
 
@@ -202,6 +215,7 @@ Content-Type: application/json
 | `delete` | ✓ | `class`, `id` |
 | `publish` | ✓ | `class`, `id` |
 | `unpublish` | ✓ | `class`, `id` |
+| `upload` | ✓ | multipart: `file`, `folder`, `filename`, `title`, `publish` |
 
 `class` accepts a fully qualified name or an unambiguous short name.
 `filter` takes ORM search filters, e.g. `{"Title:PartialMatch": "news"}`.
@@ -247,6 +261,17 @@ writing — it is what makes the API usable without knowing the project.
 Writing a field the class does not have is an error rather than a silent no-op,
 so a typo surfaces immediately.
 
+### Uploading files
+
+`upload` takes a `multipart/form-data` POST with the file in `file`. It goes
+through Silverstripe's own `Upload`, so the site's allowed extensions, size
+limits and file name filter apply as in the CMS. `folder` defaults to
+`FileService.default_folder` (`Uploads`) and is created if missing; `publish`
+defaults to true. The response is the File record, including `AbsoluteURL`.
+
+The PHP limits `upload_max_filesize` and `post_max_size` still apply on the
+site.
+
 ### Versioned records
 
 Writes always go to the **draft** stage, whatever reading stage the request is
@@ -266,6 +291,7 @@ The manager signs these alongside the standard `iat` / `exp`. All are optional.
 | `sub` | Email or ID of the member to act as. Defaults to gate-client's configured member. |
 | `scope` | `read` (default) or `write`. |
 | `classes` | Array of class names this token may touch. |
+| `actions` | Array of actions this token may call. Set on presigned tokens. |
 
 `CryptographyService::generateJwt()` in gate-manager already accepts a payload
 array, so no change is needed there:

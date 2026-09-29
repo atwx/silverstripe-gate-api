@@ -149,6 +149,31 @@ class AuthServiceTest extends SapphireTest
         $this->assertTrue($context->canWrite());
     }
 
+    public function testTokenWithoutActionsClaimAllowsEveryAction(): void
+    {
+        $context = AuthService::create()->authenticate($this->request($this->token()));
+
+        $this->assertNull($context->getActions());
+        $this->assertTrue($context->allowsAction('query'));
+    }
+
+    public function testActionsClaimLimitsTheToken(): void
+    {
+        $context = AuthService::create()->authenticate(
+            $this->request($this->token(['scope' => 'write', 'actions' => ['Upload']]))
+        );
+
+        $this->assertTrue($context->allowsAction('upload'));
+        $this->assertFalse($context->allowsAction('update'));
+    }
+
+    public function testEmptyActionsClaimIsRejected(): void
+    {
+        $this->expectException(ApiException::class);
+
+        AuthService::create()->authenticate($this->request($this->token(['actions' => []])));
+    }
+
     public function testWriteScopeIsRefusedWhenTheSiteForbidsWrites(): void
     {
         Config::modify()->set(AuthService::class, 'allow_writes', false);

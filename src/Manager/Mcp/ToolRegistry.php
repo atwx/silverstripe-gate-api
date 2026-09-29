@@ -4,6 +4,7 @@ namespace Atwx\SilverGateApi\Manager\Mcp;
 
 use Atwx\SilverGateApi\Exceptions\ApiException;
 use Atwx\SilverGateApi\Manager\Services\SiteApiClient;
+use Atwx\SilverGateManager\Models\ManagedSite;
 use SilverStripe\Core\Extensible;
 use SilverStripe\Core\Injector\Injectable;
 use SilverStripe\Security\Member;
@@ -116,6 +117,12 @@ class ToolRegistry
     ];
 
     /**
+     * Presigned upload: the file itself never passes through MCP, which could
+     * not carry binaries of any useful size.
+     */
+    private const UPLOAD_TOOL = 'site_upload_url';
+
+    /**
      * @return array<int, array<string, mixed>>
      */
     public function listTools(Member $member, bool $mayWrite): array
@@ -148,6 +155,25 @@ class ToolRegistry
             ];
         }
 
+        if ($mayWrite) {
+            $tools[] = [
+                'name' => self::UPLOAD_TOOL,
+                'description' => 'Get a presigned request for uploading one file to a site. '
+                    . 'Send the file yourself as multipart/form-data POST, field "file", with the returned '
+                    . 'headers, e.g. with curl. Optional form fields: folder, filename, title, publish '
+                    . '(default true). The token is valid for about a minute and for uploads only, so ask '
+                    . 'for a fresh one per file. The response is the new File record with ID and AbsoluteURL; '
+                    . 'set it on a has_one such as the FileID of a FileLink.',
+                'inputSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'site' => ['type' => 'string', 'description' => 'Domain of the site, from sites_list'],
+                    ],
+                    'required' => ['site'],
+                ],
+            ];
+        }
+
         $this->extend('updateTools', $tools, $member, $mayWrite);
 
         return $tools;
@@ -163,6 +189,10 @@ class ToolRegistry
             return $this->listSites($member, $mayWrite);
         }
 
+        if ($name === self::UPLOAD_TOOL) {
+            return $this->presignUpload($arguments, $member, $mayWrite);
+        }
+
         $action = str_starts_with($name, 'site_') ? substr($name, 5) : '';
 
         if (!isset(self::ACTIONS[$action])) {
@@ -175,18 +205,8 @@ class ToolRegistry
             throw new ApiException('This connection was authorised for reading only.', 403);
         }
 
-        $domain = trim((string) ($arguments['site'] ?? ''));
-
-        if ($domain === '') {
-            throw new ApiException('"site" is required. Call sites_list to see what you may reach.', 400);
-        }
-
         $scope = $writes ? SitePolicy::SCOPE_WRITE : SitePolicy::SCOPE_READ;
-        $site = SitePolicy::singleton()->resolve($domain, $member, $scope);
-
-        if (!$site) {
-            throw new ApiException(sprintf('No site "%s" that you may access.', $domain), 403);
-        }
+        $site = $this->resolveSite($arguments, $member, $scope);
 
         unset($arguments['site']);
 
@@ -212,5 +232,56 @@ class ToolRegistry
         }
 
         return ['sites' => $sites];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     * @return array<string, mixed>
+     */
+    private function presignUpload(array $arguments, Member $member, bool $mayWrite): array
+    {
+        if (!$mayWrite) {
+            throw new ApiException('This connection was authorised for reading only.', 403);
+        }
+
+        $site = $this->resolveSite($arguments, $member, SitePolicy::SCOPE_WRITE);
+        $request = SiteApiClient::singleton()->presign($site, 'upload', [
+            'sub' => $member->Email,
+            'scope' => SitePolicy::SCOPE_WRITE,
+        ]);
+
+        return [
+            'method' => 'POST',
+            'url' => $request['url'],
+            'headers' => $request['headers'],
+            'file_field' => 'file',
+            'optional_fields' => ['folder', 'filename', 'title', 'publish'],
+            'expires_in' => 60,
+            'example' => sprintf(
+                'curl -sS -X POST %s -H %s -F "file=@/path/to/file.pdf" -F "folder=Uploads"',
+                escapeshellarg($request['url']),
+                escapeshellarg('Authorization: ' . $request['headers']['Authorization'])
+            ),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $arguments
+     */
+    private function resolveSite(array $arguments, Member $member, string $scope): ManagedSite
+    {
+        $domain = trim((string) ($arguments['site'] ?? ''));
+
+        if ($domain === '') {
+            throw new ApiException('"site" is required. Call sites_list to see what you may reach.', 400);
+        }
+
+        $site = SitePolicy::singleton()->resolve($domain, $member, $scope);
+
+        if (!$site) {
+            throw new ApiException(sprintf('No site "%s" that you may access.', $domain), 403);
+        }
+
+        return $site;
     }
 }

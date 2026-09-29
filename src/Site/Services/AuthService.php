@@ -31,6 +31,8 @@ use stdClass;
  *            exactly as an absent claim does.
  *   scope    "read" (default) or "write".
  *   classes  Array of class names the token is limited to.
+ *   actions  Array of API actions the token is limited to. Used for tokens
+ *            that leave the manager, such as presigned upload tokens.
  *
  * Unlike the gate client's browser login this never starts a session. The
  * member is set for the duration of the request only, so every call has to
@@ -67,12 +69,13 @@ class AuthService
 
         $scope = $this->resolveScope($claims);
         $classes = $this->resolveClasses($claims);
+        $actions = $this->resolveActions($claims);
 
         // Make the member current for this request so canView()/canEdit() apply,
         // without persisting anything to a session.
         Security::setCurrentUser($member);
 
-        return new AuthContext($member, $scope, $classes);
+        return new AuthContext($member, $scope, $classes, $actions);
     }
 
     protected function extractToken(HTTPRequest $request): string
@@ -176,6 +179,27 @@ class AuthService
         }
 
         return $classes;
+    }
+
+    /**
+     * @return string[]|null
+     */
+    protected function resolveActions(stdClass $claims): ?array
+    {
+        if (!isset($claims->actions)) {
+            return null;
+        }
+
+        $actions = array_values(array_filter(array_map(
+            fn($action) => strtolower(trim((string) $action)),
+            (array) $claims->actions
+        )));
+
+        if (!$actions) {
+            throw new ApiException('The token allows no actions at all.', 403);
+        }
+
+        return $actions;
     }
 
     /**

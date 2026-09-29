@@ -6,6 +6,7 @@ use Atwx\SilverGateApi\Exceptions\ApiException;
 use Atwx\SilverGateApi\Site\Services\AccessPolicy;
 use Atwx\SilverGateApi\Site\Services\AuthContext;
 use Atwx\SilverGateApi\Site\Services\AuthService;
+use Atwx\SilverGateApi\Site\Services\FileService;
 use Atwx\SilverGateApi\Site\Services\RecordService;
 use Atwx\SilverGateApi\Site\Services\SchemaService;
 use SilverStripe\Control\Controller;
@@ -52,6 +53,7 @@ class ApiController extends Controller
         'delete' => true,
         'publish' => true,
         'unpublish' => true,
+        'upload' => true,
     ];
 
     protected function init(): void
@@ -82,6 +84,11 @@ class ApiController extends Controller
             }
 
             $context = AuthService::singleton()->authenticate($request);
+
+            if (!$context->allowsAction($action)) {
+                throw new ApiException(sprintf('This token may not call "%s".', $action), 403);
+            }
+
             $payload = $this->readPayload($request);
 
             return $this->respond($this->dispatch($action, $payload, $context));
@@ -180,6 +187,15 @@ class ApiController extends Controller
                 $this->requireId($payload),
                 $context
             ),
+
+            'upload' => FileService::singleton()->upload(
+                $this->requireUploadedFile($payload),
+                $context,
+                $this->optionalString($payload, 'folder'),
+                $this->optionalString($payload, 'filename'),
+                $this->optionalString($payload, 'title'),
+                filter_var($payload['publish'] ?? true, FILTER_VALIDATE_BOOL)
+            ),
         };
     }
 
@@ -188,6 +204,11 @@ class ApiController extends Controller
      */
     protected function readPayload(HTTPRequest $request): array
     {
+        // Multipart uploads carry their fields and the file as POST vars.
+        if ($request->postVars()) {
+            return array_merge($request->getVars(), $request->postVars());
+        }
+
         $body = trim((string) $request->getBody());
 
         if ($body === '') {
@@ -266,5 +287,27 @@ class ApiController extends Controller
         }
 
         return $fields;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed> The PHP upload array for the "file" field.
+     */
+    protected function requireUploadedFile(array $payload): array
+    {
+        $file = $payload['file'] ?? null;
+
+        if (!is_array($file) || !isset($file['tmp_name'], $file['error'])) {
+            // PHP drops the whole body when it exceeds post_max_size, which
+            // looks exactly like a request without a file.
+            throw new ApiException(sprintf(
+                'Send the file as multipart/form-data in a field named "file" '
+                . '(this site accepts up to post_max_size %s, upload_max_filesize %s).',
+                ini_get('post_max_size'),
+                ini_get('upload_max_filesize')
+            ), 400);
+        }
+
+        return $file;
     }
 }

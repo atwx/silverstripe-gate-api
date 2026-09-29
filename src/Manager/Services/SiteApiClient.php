@@ -132,6 +132,28 @@ class SiteApiClient
         );
     }
 
+    /**
+     * A ready signed request for one action, for a caller that has to send the
+     * request itself - typically a file upload too large to pass through the
+     * MCP connection. The token is limited to that single action.
+     *
+     * @param array<string, mixed> $claims
+     * @return array{url: string, headers: array<string, string>}
+     */
+    public function presign(ManagedSite $site, string $action, array $claims = []): array
+    {
+        if (!$site->isInDB() || !$site->Domain) {
+            throw new ApiException('The managed site has no domain.', 400);
+        }
+
+        $claims['actions'] = [$action];
+
+        return [
+            'url' => $this->getEndpoint($site, $action),
+            'headers' => ['Authorization' => 'Bearer ' . $this->generateToken($site, $claims)],
+        ];
+    }
+
     public function getEndpoint(ManagedSite $site, string $action): string
     {
         return sprintf(

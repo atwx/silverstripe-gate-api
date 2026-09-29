@@ -19,14 +19,19 @@ class AuthContext
     /** @var string[]|null Class names the token is limited to, null means no limit. */
     private ?array $classes;
 
+    /** @var string[]|null Actions the token is limited to, null means no limit. */
+    private ?array $actions;
+
     /**
      * @param string[]|null $classes
+     * @param string[]|null $actions
      */
-    public function __construct(Member $member, string $scope, ?array $classes = null)
+    public function __construct(Member $member, string $scope, ?array $classes = null, ?array $actions = null)
     {
         $this->member = $member;
         $this->scope = $scope;
         $this->classes = $classes;
+        $this->actions = $actions;
     }
 
     public function getMember(): Member
@@ -50,5 +55,18 @@ class AuthContext
     public function getClasses(): ?array
     {
         return $this->classes;
+    }
+
+    /**
+     * @return string[]|null
+     */
+    public function getActions(): ?array
+    {
+        return $this->actions;
+    }
+
+    public function allowsAction(string $action): bool
+    {
+        return $this->actions === null || in_array($action, $this->actions, true);
     }
 }
